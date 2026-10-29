@@ -3,7 +3,7 @@
 import type { AuthProvider, Client, FetchLike, Transport } from '@modelcontextprotocol/client'
 import { withDeadline } from './deadline.ts'
 import { McpLocalError } from './diagnostic.ts'
-import { createTransport } from './transport.ts'
+import { createTransport, type TransportHooks } from './transport.ts'
 import type { Config } from './index.ts'
 import type { McpCloseResult } from './types.ts'
 
@@ -30,14 +30,15 @@ export class McpGeneration {
    * @param timeoutMs - remaining operation budget; undefined leaves the SDK default.
    * @param fetch - optional OAuth request wrapper bound to the active grant.
    * @param authProvider - optional passive OAuth callbacks, tracked through actual settlement.
+   * @param hooks - transport signals the owner supervises; omission leaves the transport uninstrumented.
    * @returns completion of negotiation, or cancellation/deadline rejection.
    */
-  connect(config: Config, timeoutMs: number | undefined, fetch?: FetchLike, authProvider?: Required<AuthProvider>): Promise<void> {
+  connect(config: Config, timeoutMs: number | undefined, fetch?: FetchLike, authProvider?: Required<AuthProvider>, hooks: TransportHooks = {}): Promise<void> {
     this.lifetime.signal.throwIfAborted()
     const transport = this.transport = createTransport(config, fetch, authProvider === undefined ? undefined : {
       token: () => this.run(() => authProvider.token()),
       onUnauthorized: context => this.run(() => authProvider.onUnauthorized(context)),
-    })
+    }, hooks)
     const close = transport.close.bind(transport)
     let closing: Promise<void> | undefined
     transport.close = () => closing ??= close()

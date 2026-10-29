@@ -338,6 +338,17 @@ export function startConnection(
       if (failure.reason === 'binding' && (credentialsDirty || checkingCredentials !== undefined)) return
       authorizationFailed(record, failure)
     }
+    /**
+     * A POST-only server that forgot the session closes no stream, so nothing
+     * else reveals the loss: the next request carries a dead session id and the
+     * SDK reports the empty 404 as a generic POST failure. Re-initialize through
+     * the reconnect path; `lost` clears ownership, so concurrent 404s share it.
+     */
+    const sessionLost = (): void => {
+      if (!isCurrent(record)) return
+      ctx.logger.warn(`${label}: server no longer holds the MCP session (HTTP 404); reconnecting`)
+      lost(record, 'server no longer holds the MCP session (HTTP 404)')
+    }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(record)) return
       ctx.logger.info(`${label}: tool list changed, re-syncing`)
@@ -364,7 +375,7 @@ export function startConnection(
       await record.wire.connect(resolved, remaining(), auth?.fetch, auth === undefined ? undefined : {
         ...auth.authProvider,
         token: async () => binding.remember(await auth.authProvider.token()),
-      })
+      }, { onSessionLost: sessionLost })
       if (!isCurrent(record)) return
       const text = client.getInstructions()?.trimEnd() ?? ''
       const instructions = text ? `### MCP server: ${config.serverName}\n\n${text}` : ''
