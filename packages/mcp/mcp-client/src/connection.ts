@@ -292,6 +292,17 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     client.onclose = () => {
       if (record.connectedAt !== undefined) lost(record, 'connection closed')
     }
+    /**
+     * A POST-only server that forgot the session closes no stream, so nothing
+     * else reveals the loss: the next request carries a dead session id and the
+     * SDK reports the empty 404 as a generic POST failure. Re-initialize through
+     * the reconnect path; `lost` clears ownership, so concurrent 404s share it.
+     */
+    const sessionLost = (): void => {
+      if (!isCurrent(record)) return
+      ctx.logger.warn(`${label}: server no longer holds the MCP session (HTTP 404); reconnecting`)
+      lost(record, 'server no longer holds the MCP session (HTTP 404)')
+    }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(record)) return
       ctx.logger.info(`${label}: tool list changed, re-syncing`)
@@ -311,7 +322,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         : config.startupTimeoutMs - (Date.now() - startedAt)
       const resolved = await record.wire.run(signal => binding.resolve(signal), remaining())
       bindingValue = { config: resolved }
-      await record.wire.connect(resolved, remaining())
+      await record.wire.connect(resolved, remaining(), { onSessionLost: sessionLost })
       if (!isCurrent(record)) return
       const text = client.getInstructions()?.trimEnd() ?? ''
       const instructions = text ? `### MCP server: ${config.serverName}\n\n${text}` : ''

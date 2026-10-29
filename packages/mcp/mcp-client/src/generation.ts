@@ -3,7 +3,7 @@
 import type { Client, Transport } from '@modelcontextprotocol/client'
 import { withDeadline } from './deadline.ts'
 import { McpLocalError } from './diagnostic.ts'
-import { createTransport } from './transport.ts'
+import { createTransport, type TransportHooks } from './transport.ts'
 import type { Config } from './index.ts'
 import type { McpCloseResult } from './types.ts'
 
@@ -28,11 +28,12 @@ export class McpGeneration {
    * Connect within the caller's remaining startup or probe budget.
    * @param config - resolved transport configuration.
    * @param timeoutMs - remaining operation budget; undefined leaves the SDK default.
+   * @param hooks - transport signals the owner supervises; omission leaves the transport uninstrumented.
    * @returns completion of negotiation, or cancellation/deadline rejection.
    */
-  connect(config: Config, timeoutMs: number | undefined): Promise<void> {
+  connect(config: Config, timeoutMs: number | undefined, hooks: TransportHooks = {}): Promise<void> {
     this.lifetime.signal.throwIfAborted()
-    const transport = this.transport = createTransport(config)
+    const transport = this.transport = createTransport(config, hooks)
     const close = transport.close.bind(transport)
     let closing: Promise<void> | undefined
     transport.close = () => closing ??= close()
