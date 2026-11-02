@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
-  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -395,22 +394,24 @@ async function acquireInstallLock(commonDirectory) {
   while (true) {
     try {
       const lockHandle = await accessInstallLock(() => openSync(lockPath, 'wx', 0o600), deadline)
-      let ownedStat
       try {
-        ownedStat = fstatSync(lockHandle)
         const publicationBarrier = process.env.DSH_TEST_LEFTHOOK_LOCK_PUBLISH_BARRIER
         if (publicationBarrier !== undefined) await waitForLockTestBarrier(publicationBarrier)
         writeFileSync(lockHandle, ownedRecord)
       } finally {
         closeSync(lockHandle)
       }
-      const publishedStat = installLockStat(lockPath)
+      // Take the identity from the published path instead of the open handle.
+      // exFAT (macOS fskit) reports a sentinel inode while a file is open and
+      // only settles the directory-entry inode after close, so comparing an
+      // fstat with a path stat can never match there. Reading the record back
+      // still catches a lock that another process replaced in the meantime.
+      const ownedStat = installLockStat(lockPath)
       if (
-        publishedStat === undefined
-        || !publishedStat.isFile()
-        || publishedStat.isSymbolicLink()
-        || publishedStat.dev !== ownedStat.dev
-        || publishedStat.ino !== ownedStat.ino
+        ownedStat === undefined
+        || !ownedStat.isFile()
+        || ownedStat.isSymbolicLink()
+        || readInstallLock(lockPath) !== ownedRecord
       ) {
         throw lockOwnershipChangedError(lockPath)
       }
